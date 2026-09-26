@@ -6,6 +6,8 @@ NEO understands from the moment you install it that you are writing *books* and 
 
 NEO runs locally. WIPs are saved in plain files on your disk. No accounts or subscriptions. And it's free!
 
+**Fork:** This fork includes a total conversion to a native macOS SwiftUI.  Built by Claude, and I'm still reviewing the code, but it seems to work fine.
+
 ## Download
 
 Get the latest installer from the **[Releases page](../../releases)**:
