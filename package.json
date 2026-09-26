@@ -87,6 +87,7 @@
     "files": [
       "**/*",
       "!pocket/**",
+      "!macos/**",
       "!dist/**",
       "!Backups/**",
       "!*.md",

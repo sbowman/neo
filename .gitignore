@@ -19,3 +19,8 @@ pocket/node_modules/
 pocket/www/app.js
 pocket/www/covers.js
 pocket/www/styles.css
+
+# NEO for macOS (native)
+macos/build/
+macos/**/xcuserdata/
+macos/**/*.xcuserstate
