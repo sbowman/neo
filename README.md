@@ -141,10 +141,6 @@ xcodebuild -project macos/NEO.xcodeproj -scheme NEO -configuration Release -deri
 ditto macos/build/Build/Products/Release/NEO.app "/Applications/NEO NativeNative
 ```
 
-To build installers: `npm install electron-builder --save-dev`, then `npm run package` (macOS), `npm run package:win` (Windows), or `npm run package:all`. Output lands in `dist/`.
-
-The app is very simple: an Electron shell (`main.js`), a preload bridge (`preload.js`), and a renderer (`app.js` + `styles.css` + `index.html`). If you know JavaScript, you can change NEO. Have at it.
-
 ## License
 
 [MIT](LICENSE) — free to use, free to modify, free to share.
