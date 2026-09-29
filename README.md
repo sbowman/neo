@@ -1,19 +1,23 @@
-# NEO
+# NEO Native for macOS
 
 **A distraction-free word processor for authors, by a wannabe author.**
 
-NEO understands from the moment you install it that you are writing *books* and nothing else. No bloat, no distractions, with manuscripts that look like books as you write them.
+NEO understands from the moment you install it that you are writing *books* and
+nothing else. No bloat, no distractions, with manuscripts that look like books
+as you write them.
 
-NEO runs locally. WIPs are saved in plain files on your disk. No accounts or subscriptions. And it's free!
+NEO runs locally. WIPs are saved in plain files on your disk. No accounts or
+subscriptions. And it's free!
 
-**Fork:** This fork includes a total conversion to a native macOS SwiftUI.  Built by Claude, and I'm still reviewing the code, but it seems to work fine.
+## Fork
 
-## Download
+This version of Neo is a fork of the original Neo, but written in SwiftUI for
+macOS.  I've also added a bunch of features that I wanted.
 
-Get the latest installer from the **[Releases page](../../releases)**:
+The macOS version remembers what book you were working on and reopens to that
+location.
 
-- **macOS** — download the `.dmg` for older Intel machines or the arm64 file for Mac silicon. Open it and drag NEO to Applications.
-- **Windows** — download the `.exe` and run it. Or get the setup installer and run that.
+All the changes are in the `macOS` directory.
 
 ## Why NEO?
 
@@ -43,7 +47,9 @@ Outline chapters and sections in the Outline tab; section notes appear in the ma
 
 **Cover Art** 
 
-Every book gets a cover! New books are dressed in a seeded abstract (six art styles, six type templates, typefaces bundled with NEO) so no two stories on the shelf look alike. Once a story passes 1,000 words, NEO can read it and paint an abstract cover from the text. This is a bit more work but totally worth it. Get an OpenAI API key from their website and paste it into Goals & Settings. The art is generated in the background for about a penny a picture. (These are not meant for publication, just writing inspiration!) The API key is stored encrypted in NEO's own settings, never in your library folder. The title and author are always set in real type on top, so the lettering is never left to a gen-AI model. The ↻ on any book re-rolls its type and colors, or paints it again. And you can always switch back and forth from the seeded modern look to the painted variety.
+Cover art in this version of Neo removes the AI component.  Now you can simply
+create your own cover and add it to your book.  Neo Native doesn't try to create
+a cover for you.
 
 **Goals and momentum** 
 
@@ -60,6 +66,64 @@ Bring in existing .docx, .txt, and .md manuscripts; chapters and scene breaks ar
 **Backups** 
 
 Continuous autosave, daily zip backups kept for two weeks, everything stored as plain files. Set up your NEO library folder on your iCloud if you want for extra safety. You can also email copies of your WIP to yourself with a keystroke: ⌘E.
+
+## Keyboard Shortcuts
+
+The macOS version of Neo now supports Wordstar 7-compatible keyboard shortcuts
+for moving around the document and creating markers.
+
+**Cursor movement**
+
+| Keys | What it does |
+|---|---|
+| ^E ^X ^S ^D | Up, down, left, right |
+| ^A ^F | Word left, word right |
+| ^R ^C | Up or down a screen |
+| ^W ^Z | Scroll one line |
+| ^QE ^QX | Top or bottom of the screen |
+| ^QS ^QD | Start or end of the line |
+| ^QR ^QC | Start or end of the book |
+| ^QB ^QK | Start or end of the block |
+| ^QG / ^QH then a character | Next or previous occurrence of that character |
+| ^QV | Back to the last find (or the block) |
+| ^QW ^QZ | Scroll continuously until any key |
+
+
+Moving up, down, left or right at a chapter's edge carries on into the next or
+previous chapter, as if the book were one document.
+
+**The other commands**
+
+| Keys | What it does |
+|---|---|
+| ^QL | Find the next misspelling after the cursor; it's selected and suggestions appear at the bottom (right-click to fix it) |
+| ^QP | Back to where the cursor was before the last jump (press again to return) |
+| ^K0–^K9 | Set a marker; press it again at the same spot to remove it |
+| ^Q0–^Q9 | Go to a marker |
+| ^KB ^KK | Mark the block's beginning and end (it shows in blue) |
+| ^KC | Copy the block to the cursor (⌘Z undoes it) |
+| ^KV | Move the block to the cursor (⌘Z undoes it, and the block goes back too) |
+| ^KW | Write the block to a text file |
+| ^KH | Hide or show the block and markers |
+
+
+For ^Q and ^K commands, the second key works with or without Ctrl. Esc cancels
+a half-typed command, and a hint at the bottom of the screen shows which keys
+follow ^Q or ^K.
+
+**Things to know**
+- **Markers** show as small gold tags above the line, and don't move your text.
+- **Blocks and markers** follow the text as you type, and survive splitting, merging and undoing chapters.
+- **One chapter per block:** a block has to begin and end in the same chapter, though you can copy or move it to any chapter.
+- **Turning it off:** the keys are on by default. Edit → WordStar Keys turns them off, which brings back macOS's own Control-key shortcuts (like ^A for start of line).
+- **Notes tab:** the basic moves work there, but blocks and markers are manuscript-only.
+- **Shortcuts (⌘/)** now has a WordStar section.
+- **Spelling:** ^QL uses macOS's dictionary, which accepted "Teh" in my test, so it may pass a few typos WordStar's dictionary would have caught.
+
+Sources:
+- [WordStar Command Summary by Victor Frank](https://sfwriter.com/wordstar-command-summary.pdf)
+- [WordStar 7 quick reference](https://sfwriter.com/quick%20reference%20(wordstar%207).pdf)
+- [WordStar Command Reference](http://cpmarchives.classiccmp.org/cpm/Software/Humongous/Editors/WordStar/Manuals/WordStar%20Command%20Reference.htm)
 
 ## Your files
 
