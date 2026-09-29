@@ -79,6 +79,7 @@ final class BookSession {
     var structureVersion = 0
 
     @ObservationIgnored weak var manuscript: ManuscriptView?
+    @ObservationIgnored var wordstar: WordStar?
     @ObservationIgnored var undoStack: [Snapshot] = []
     @ObservationIgnored var breakRun = 0
     @ObservationIgnored var enterRun = 0
@@ -104,6 +105,7 @@ final class BookSession {
         var sectionNotes: [String: [SectionNote]]
         var darlings: [Darling]
         var stickies: [Sticky]
+        var wordstar: [String: WordStar.Spot] = [:]
     }
 
     var theme: PageTheme { app.theme }
@@ -130,6 +132,7 @@ final class BookSession {
         darlings = LibraryStore.readList(meta.id, "darlings").compactMap(Darling.init)
         bookWords = chapterWords.values.reduce(0, +)
         migrateDarlingAnchors()
+        wordstar = WordStar(session: self)
     }
 
     private func makeChapter(_ id: String, _ content: NSAttributedString) -> Chapter {
@@ -432,6 +435,7 @@ final class BookSession {
     }
 
     func jumpToChapter(_ chId: String) {
+        wordstar?.remember()
         navOpen = false
         switchTab(.manuscript)
         DispatchQueue.main.async { self.manuscript?.jumpToChapter(chId) }
@@ -515,6 +519,7 @@ final class BookSession {
         meta.sectionNotes[chId] = nil
         meta.chapterNotes[chId] = nil
         stickies.removeAll { $0.chapterId == chId }
+        wordstar?.forget(chId)
         if currentChapterId == chId { currentChapterId = nil }
         saveStickies()
         LibraryStore.deleteChapter(meta.id, chId)
@@ -574,12 +579,14 @@ final class BookSession {
         guard let ch = chapter(chId), let idx = index(of: chId) else { return }
         let ts = ch.storage
         let tail = ts.attributedSubstring(from: NSRange(location: loc, length: ts.length - loc))
+        let carried = wordstar?.detach(chId, from: loc) ?? [:]
         // the separator before the split point goes too
         let cut = loc > 0 ? loc - 1 : loc
         ts.replaceCharacters(in: NSRange(location: cut, length: ts.length - cut), with: "")
         chapterEdited(chId)
         let keep = manuscript?.scrollOffset
         let newId = createChapter(at: idx + 1, content: tail)
+        wordstar?.adopt(carried, into: newId)
         // flags and section ghosts that moved belong to the new chapter now
         reconcileMarks()
         manuscript?.focusChapterStart(newId)
@@ -606,8 +613,10 @@ final class BookSession {
         let keep = manuscript?.scrollOffset
         let prevParas = Prose.paragraphs(prev.storage.string as NSString).count
         let body = NSAttributedString(attributedString: cur.storage)
+        let joinAt = prev.storage.length + 1
         prev.storage.append(NSAttributedString(string: "\n"))
         prev.storage.append(body)
+        wordstar?.merge(chId, into: prevId, offset: joinAt)
         chapterEdited(prevId)
         for i in stickies.indices where stickies[i].chapterId == chId { stickies[i].chapterId = prevId }
         saveStickies()
@@ -662,7 +671,8 @@ final class BookSession {
         undoStack.append(Snapshot(label: label, rejoin: rejoin, caret: manuscript?.captureCaret(),
                                   chapterOrder: meta.chapterOrder, contents: contents,
                                   chapterTitles: meta.chapterTitles, chapterNotes: meta.chapterNotes,
-                                  sectionNotes: meta.sectionNotes, darlings: darlings, stickies: stickies))
+                                  sectionNotes: meta.sectionNotes, darlings: darlings, stickies: stickies,
+                                  wordstar: wordstar?.savedSlots ?? [:]))
         if undoStack.count > 10 { undoStack.removeFirst() }
     }
 
@@ -693,6 +703,7 @@ final class BookSession {
         if let c = currentChapterId, !meta.chapterOrder.contains(c) { currentChapterId = nil }
         recountAll()
         structureChanged()
+        wordstar?.savedSlots = snap.wordstar.filter { meta.chapterOrder.contains($0.value.chId) }
         if let c = snap.caret { manuscript?.restoreCaret(c) }
         if snap.rejoin { rejoinAtCaret() }
         resetNativeUndo()
@@ -760,6 +771,7 @@ final class StorageNormalizer: NSObject, NSTextStorageDelegate {
                      range editedRange: NSRange, changeInLength delta: Int) {
         guard editedMask.contains(.editedCharacters) else { return }
         MainActor.assumeIsolated {
+            if mode == .chapter { session?.wordstar?.adjust(ts, editedRange, delta) }
             StorageNormalizer.normalize(ts, editedRange, mode: mode)
             ProseStyler.style(ts, around: editedRange, theme: theme(), mode: mode)
         }

@@ -278,10 +278,11 @@ private struct StickyCard: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { withAnimation(.easeIn(duration: 0.6)) { glow = false } }
             }
             text = sticky.text
-            if session.focusStickyId == sticky.id { focusToken += 1; session.focusStickyId = nil }
+            // a brand-new note's field may not exist yet: focus on the next turn
+            if session.focusStickyId == sticky.id { session.focusStickyId = nil; DispatchQueue.main.async { focusToken += 1 } }
         }
         .onChange(of: session.focusStickyId) { _, v in
-            if v == sticky.id { focusToken += 1; session.focusStickyId = nil }
+            if v == sticky.id { session.focusStickyId = nil; DispatchQueue.main.async { focusToken += 1 } }
         }
     }
 }

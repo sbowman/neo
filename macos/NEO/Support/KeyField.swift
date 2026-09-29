@@ -72,13 +72,24 @@ struct KeyField: NSViewRepresentable {
         ])
         if focusToken != f.lastFocusToken {
             f.lastFocusToken = focusToken
-            DispatchQueue.main.async {
-                guard let w = f.window else { return }
-                w.makeFirstResponder(f)
-                if let ed = f.currentEditor() {
-                    if selectAllOnFocus { ed.selectAll(nil) }
-                    else { ed.selectedRange = NSRange(location: (f.stringValue as NSString).length, length: 0) }
-                }
+            focus(f, selectAll: selectAllOnFocus, attempts: 20)
+        }
+    }
+
+    /// Take the keyboard as soon as the field is actually in a window — a
+    /// field that was just created may not be attached yet.
+    private func focus(_ f: Field, selectAll: Bool, attempts: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (attempts == 20 ? 0 : 0.03)) {
+            guard let w = f.window, !f.isHiddenOrHasHiddenAncestor else {
+                if attempts > 0 { focus(f, selectAll: selectAll, attempts: attempts - 1) }
+                return
+            }
+            w.makeFirstResponder(f)
+            if let ed = f.currentEditor() {
+                if selectAll { ed.selectAll(nil) }
+                else { ed.selectedRange = NSRange(location: (f.stringValue as NSString).length, length: 0) }
+            } else if attempts > 0 {
+                focus(f, selectAll: selectAll, attempts: attempts - 1)
             }
         }
     }

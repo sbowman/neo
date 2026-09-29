@@ -30,12 +30,14 @@ final class MenuModel: ObservableObject {
     @Published var theme = PageTheme.default
     @Published var typewriter = false
     @Published var bright = false
+    @Published var wordstar = true
 
     func refresh(_ app: AppModel) {
         if hasBook != (app.session != nil) { hasBook = app.session != nil }
         if theme != app.theme { theme = app.theme }
         if typewriter != app.library.typewriter { typewriter = app.library.typewriter }
         if bright != app.library.uiBright { bright = app.library.uiBright }
+        if wordstar != app.library.wordstarKeys { wordstar = app.library.wordstarKeys }
     }
 }
 
@@ -157,6 +159,8 @@ struct NEOCommands: Commands {
                 .keyboardShortcut("x", modifiers: [.command, .shift])
                 Button("Send Selection to Darlings") { app.withBook { $0.darlingFromKeyboard() } }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
+            Divider()
+            Toggle("WordStar Keys", isOn: Binding(get: { state.wordstar }, set: { _ in app.toggleWordStar() }))
             }
         CommandMenu("Format") {
             Button("Bold") { send(#selector(ProseTextView.neoToggleBold(_:))) }

@@ -7,7 +7,13 @@ final class NotesTextView: ProseTextView {
 
     override func mouseDown(with event: NSEvent) {
         session?.pageClicked()
+        session?.wordstar?.cancel()
         super.mouseDown(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if !hasMarkedText(), let ws = session?.wordstar, ws.handle(event, in: self) { return }
+        super.keyDown(with: event)
     }
 
     override func draw(_ dirtyRect: NSRect) {

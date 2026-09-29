@@ -65,6 +65,8 @@ extension BookSession {
         guard n > 0 else { return }
         searchIndex = ((i % n) + n) % n
         let m = searchMatches[searchIndex]
+        wordstar?.remember()
+        wordstar?.lastFind = WordStar.Spot(chId: m.chId, loc: m.range.location)
         manuscript?.highlightSearch(searchMatches, current: searchIndex)
         manuscript?.reveal(m.chId, m.range, select: false)
     }

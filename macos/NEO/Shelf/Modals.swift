@@ -504,6 +504,26 @@ struct HelpModal: View {
             ("⌘⇧I", "Import .docx / .txt / .md manuscripts"),
             ("File → Export", "txt · md · html · pdf · docx · epub")
         ]),
+        ("WordStar keys (Edit → WordStar Keys)", [
+            ("^E ^X ^S ^D", "Up, down, left, right — across chapters"),
+            ("^A ^F", "Word left, word right"),
+            ("^R ^C · ^W ^Z", "Up/down a screen · scroll a line"),
+            ("^QE ^QX", "Top / bottom of the screen"),
+            ("^QS ^QD", "Start / end of the line"),
+            ("^QR ^QC", "Start / end of the book"),
+            ("^QG ^QH", "To the next / previous character you type"),
+            ("^QW ^QZ", "Scroll continuously (any key stops)"),
+            ("^QP", "Back to where the cursor was before"),
+            ("^QV", "Back to the last find (or the block)"),
+            ("^QL", "Next misspelling after the cursor"),
+            ("^K0–^K9", "Set a marker (again, same spot: remove it)"),
+            ("^Q0–^Q9", "Go to a marker"),
+            ("^KB ^KK", "Mark block beginning / end"),
+            ("^QB ^QK", "To block beginning / end"),
+            ("^KC ^KV", "Copy / move the block to the cursor"),
+            ("^KW", "Write the block to a text file"),
+            ("^KH", "Hide / show the block and markers")
+        ]),
         ("Mouse", [
             ("Drag text", "Onto the Darlings tab"),
             ("Right-click", "Books, shelf names, chapter headings, outline lines"),

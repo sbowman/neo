@@ -88,6 +88,32 @@ enum DebugDriver {
             case "esc": _ = app.handleEscape()
             default: break
             }
+        case "ctrl", "plain":
+            // ctrl <c>: Control+c, as a keyboard sends it · plain <c>: c alone (after a ^Q/^K prefix)
+            let codes: [String: UInt16] = ["a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
+                                           "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "o": 31, "u": 32,
+                                           "i": 34, "p": 35, "l": 37, "j": 38, "k": 40, "n": 45, "m": 46,
+                                           "1": 18, "2": 19, "3": 20, "4": 21, "5": 23, "6": 22, "7": 26, "8": 28, "9": 25, "0": 29]
+            let c = arg.lowercased()
+            let chars: String
+            if cmd == "ctrl", let u = c.unicodeScalars.first, c.count == 1, ("a"..."z").contains(c) {
+                chars = String(UnicodeScalar(u.value - 96)!)
+            } else { chars = c }
+            if let w = window,
+               let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: cmd == "ctrl" ? [.control] : [],
+                                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: w.windowNumber,
+                                        context: nil, characters: chars, charactersIgnoringModifiers: c,
+                                        isARepeat: false, keyCode: codes[c] ?? 0) {
+                w.sendEvent(e)
+            }
+        case "sheet":
+            // sheet <file>: is a sheet showing? then cancel it
+            var out = "none"
+            for w in NSApp.windows { if let sh = w.attachedSheet {
+                out = "\(type(of: sh)) " + ((sh as? NSSavePanel)?.nameFieldStringValue ?? "")
+                w.endSheet(sh, returnCode: .cancel)
+            } }
+            try? out.write(toFile: arg, atomically: true, encoding: .utf8)
         case "cmd":
             let bits = arg.split(separator: " ").map(String.init)
             var mods: NSEvent.ModifierFlags = [.command]
@@ -351,6 +377,10 @@ enum DebugDriver {
                 }
                 out += "last click: \(clickLog)\n"
                 out += "search visible: \(s.searchVisible)\n"
+                out += "toast: \(app.toast ?? "-")\n"
+                if let ws = s.wordstar {
+                    out += "block: \(ws.blockBegin.map { "\($0.chId)@\($0.loc)" } ?? "-") .. \(ws.blockEnd.map { "\($0.chId)@\($0.loc)" } ?? "-") hidden=\(ws.hidden)\n"
+                }
                 if let tv = window?.firstResponder as? ChapterTextView {
                     let str = (tv.textStorage?.string ?? "") as NSString
                     let loc = tv.selectedRange().location

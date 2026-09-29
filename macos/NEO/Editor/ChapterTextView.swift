@@ -51,6 +51,10 @@ final class ChapterTextView: ProseTextView, NSLayoutManagerDelegate {
     // MARK: Keys
 
     override func keyDown(with event: NSEvent) {
+        if !hasMarkedText(), let ws = session?.wordstar, ws.handle(event, in: self) {
+            session?.enterRun = 0
+            return
+        }
         if !hasMarkedText(), let session {
             let isReturn = event.keyCode == 36 || event.keyCode == 76
             let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
@@ -102,6 +106,7 @@ final class ChapterTextView: ProseTextView, NSLayoutManagerDelegate {
 
     override func mouseDown(with event: NSEvent) {
         session?.enterRun = 0
+        session?.wordstar?.cancel()
         // a flag shows its note — and leaves the text alone: no caret move, no
         // selection, focus stays on the page (so the drop cap doesn't jump)
         if let ci = characterIndex(atWindowPoint: event.locationInWindow),
@@ -234,6 +239,7 @@ final class ChapterTextView: ProseTextView, NSLayoutManagerDelegate {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
+        drawWordStarTags()
         guard let cap = capRange, let lm = layoutManager, let tc = textContainer, let ts = textStorage,
               NSMaxRange(cap) < ts.length else { return }
         let theme = self.theme
@@ -246,5 +252,36 @@ final class ChapterTextView: ProseTextView, NSLayoutManagerDelegate {
         let origin = NSPoint(x: textContainerOrigin.x, y: textContainerOrigin.y + baseline - capFont.ascender)
         _ = tc
         (capText as NSString).draw(at: origin, withAttributes: [.font: capFont, .foregroundColor: theme.ink])
+    }
+
+    // MARK: WordStar tags
+
+    /// Markers <0>–<9> (and <B>/<K> for a half-marked block), drawn in the
+    /// space above the line so they never move the words.
+    private func drawWordStarTags() {
+        guard let session, let ws = session.wordstar, ws.enabled, let lm = layoutManager, let tc = textContainer,
+              let ts = textStorage, let m = session.manuscript else { return }
+        let tags = ws.tags(in: chapterId)
+        guard !tags.isEmpty else { return }
+        let t = theme
+        let font = NSFont.systemFont(ofSize: max(9, 10 * t.zoom), weight: .bold)
+        for tag in tags {
+            let loc = min(tag.loc, ts.length)
+            let caret = m.localRect(self, NSRange(location: loc, length: 0))
+            var top = caret.minY
+            if ts.length > 0 {
+                let gi = lm.glyphIndexForCharacter(at: min(loc, ts.length - 1))
+                top = lm.lineFragmentRect(forGlyphAt: gi, effectiveRange: nil).minY + textContainerOrigin.y
+            }
+            _ = tc
+            let label = tag.label as NSString
+            let size = label.size(withAttributes: [.font: font])
+            let w = size.width + 8
+            let x = min(max(0, caret.minX - w / 2), bounds.maxX - w)   // whole, never clipped at the margin
+            let box = NSRect(x: x, y: top, width: w, height: size.height + 1)
+            (tag.label == "B" || tag.label == "K" ? NSColor(srgbRed: 0.36, green: 0.55, blue: 0.86, alpha: 0.95) : NEOColor.nsAccent).setFill()
+            NSBezierPath(roundedRect: box, xRadius: 3, yRadius: 3).fill()
+            label.draw(at: NSPoint(x: box.minX + 4, y: box.minY + 0.5), withAttributes: [.font: font, .foregroundColor: NSColor(hex: 0x1C1C1C)])
+        }
     }
 }

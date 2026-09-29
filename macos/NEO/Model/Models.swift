@@ -85,6 +85,7 @@ struct Library {
     var emailAddress: String?
     var emailMethod: String?       // "mail" | "gmail"
     var lastOpenBookId: String?    // the book that was open at quit, reopened at launch
+    var wordstarKeys: Bool         // WordStar's Control-key commands in the manuscript
 
     static func seed() -> Library {
         Library([
@@ -124,6 +125,7 @@ struct Library {
         emailAddress = d.string("emailAddress")
         emailMethod = d.string("emailMethod")
         lastOpenBookId = d.string("lastOpenBookId")
+        wordstarKeys = d.bool("wordstarKeys") ?? true
     }
 
     var json: JSONDict {
@@ -154,6 +156,7 @@ struct Library {
         d.set("emailAddress", emailAddress)
         d.set("emailMethod", emailMethod)
         d.set("lastOpenBookId", lastOpenBookId)
+        d["wordstarKeys"] = wordstarKeys
         return d
     }
 

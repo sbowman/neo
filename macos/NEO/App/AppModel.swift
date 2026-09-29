@@ -124,6 +124,14 @@ final class AppModel {
 
     func zoom(by k: CGFloat) { setZoom(theme.zoom * k) }
 
+    func toggleWordStar() {
+        library.wordstarKeys.toggle()
+        saveLibrary()
+        session?.wordstar?.cancel()
+        session?.manuscript?.refreshWordStar()
+        showToast(library.wordstarKeys ? "WordStar keys on — ^E ^X ^S ^D, ^Q…, ^K…" : "WordStar keys off")
+    }
+
     func toggleTypewriter() {
         library.typewriter.toggle()
         saveLibrary()
@@ -492,6 +500,22 @@ final class AppModel {
         }
     }
 
+    /// ^KW: a block written out as plain text.
+    func saveText(_ text: String, suggestedName: String) async {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedName + ".txt"
+        panel.directoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        panel.allowedContentTypes = [.plainText]
+        panel.isExtensionHidden = false
+        guard await present(panel), let url = panel.url else { return }
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            showToast("Block written to " + url.lastPathComponent)
+        } catch {
+            showToast("Couldn’t write the block: \(error.localizedDescription)", seconds: 6)
+        }
+    }
+
     private func savePanel(_ name: String, _ ext: String) async -> URL? {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = name + "." + ext
@@ -633,6 +657,7 @@ final class AppModel {
     /// leaves full screen. Closing the book is ⌘W.
     func handleEscape() -> Bool {
         if modal != nil { dismissModal(); return true }
+        if let s = session, s.wordstar?.cancel() == true { return true }
         if let s = session, s.editingStickyId != nil { s.returnToPage(); return true }
         if let s = session, s.searchVisible { s.closeSearch(); return true }
         if let w = NSApp.keyWindow, w.styleMask.contains(.fullScreen) { w.toggleFullScreen(nil); return true }

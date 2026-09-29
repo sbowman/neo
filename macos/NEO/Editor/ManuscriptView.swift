@@ -512,22 +512,85 @@ final class ManuscriptView: NSView, NSTextViewDelegate {
         if let best { session.scrolledTo(best) }
     }
 
-    private func rect(of range: NSRange, in tv: ChapterTextView) -> NSRect {
+    /// A range's rectangle in its text view's own coordinates. A collapsed
+    /// range is the caret: a sliver at the insertion point.
+    func localRect(_ tv: ChapterTextView, _ range: NSRange) -> NSRect {
         guard let lm = tv.layoutManager, let tc = tv.textContainer, let ts = tv.textStorage else { return tv.bounds }
         var r: NSRect
         if ts.length == 0 {
             r = NSRect(x: 0, y: 0, width: 1, height: ProseStyler.lineHeight(theme, .chapter))
         } else if range.location >= ts.length && lm.extraLineFragmentTextContainer != nil {
             r = lm.extraLineFragmentRect
+            r.size.width = 1
+        } else if range.location >= ts.length {
+            let gr = lm.glyphRange(forCharacterRange: NSRange(location: ts.length - 1, length: 1), actualCharacterRange: nil)
+            r = lm.boundingRect(forGlyphRange: gr, in: tc)
+            r.origin.x = r.maxX
+            r.size.width = 1
         } else {
-            let loc = min(range.location, ts.length - 1)
+            let loc = range.location
             let gr = lm.glyphRange(forCharacterRange: NSRange(location: loc, length: max(1, min(range.length, ts.length - loc))),
                                    actualCharacterRange: nil)
             r = lm.boundingRect(forGlyphRange: gr, in: tc)
+            if range.length == 0 { r.size.width = 1 }
         }
         r.origin.x += tv.textContainerOrigin.x
         r.origin.y += tv.textContainerOrigin.y
-        return tv.convert(r, to: doc)
+        return r
+    }
+
+    private func rect(of range: NSRange, in tv: ChapterTextView) -> NSRect {
+        tv.convert(localRect(tv, range), to: doc)
+    }
+
+    // MARK: Geometry for WordStar's moves
+
+    var lineHeight: CGFloat { ProseStyler.lineHeight(theme, .chapter) }
+    var visibleDocRect: NSRect { scroll.contentView.bounds }
+
+    func docRect(_ chId: String, _ range: NSRange) -> NSRect {
+        guard let tv = textView(chId) else { return .zero }
+        return rect(of: range, in: tv)
+    }
+
+    /// The text position under a point on the page. A point between sheets
+    /// goes to the nearest chapter's text.
+    func spot(atDocPoint p: NSPoint) -> WordStar.Spot? {
+        let list = order.compactMap { sheets[$0] }
+        guard !list.isEmpty else { return nil }
+        let sheet = list.first { $0.frame.minY <= p.y && p.y <= $0.frame.maxY }
+            ?? list.min { abs($0.frame.midY - p.y) < abs($1.frame.midY - p.y) }!
+        return spot(atLocal: sheet.textView.convert(p, from: doc), in: sheet.chId)
+    }
+
+    func spot(atLocal p: NSPoint, in chId: String) -> WordStar.Spot? {
+        guard let tv = textView(chId) else { return nil }
+        let pt = NSPoint(x: min(max(p.x, 0), tv.bounds.maxX - 1), y: min(max(p.y, 1), max(1, tv.bounds.maxY - 1)))
+        return WordStar.Spot(chId: chId, loc: tv.characterIndexForInsertion(at: pt))
+    }
+
+    /// Scroll a range into view only if it isn't already.
+    func ensureVisible(_ chId: String, _ range: NSRange) {
+        layoutSheets()
+        let r = docRect(chId, range)
+        if !visibleDocRect.insetBy(dx: 0, dy: lineHeight).contains(NSPoint(x: r.midX, y: r.midY)) { center(chId, range) }
+    }
+
+    private var blockShown: (chId: String, range: NSRange)?
+    static let blockColor = NSColor(srgbRed: 0.36, green: 0.55, blue: 0.86, alpha: 0.35)
+
+    /// Repaint WordStar's marked block and marker tags.
+    func refreshWordStar() {
+        if let (c, r) = blockShown, let tv = textView(c), let lm = tv.layoutManager, let len = tv.textStorage?.length {
+            lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: NSIntersectionRange(r, NSRange(location: 0, length: len)))
+        }
+        blockShown = nil
+        if let (c, r) = session.wordstar?.visibleBlock, let tv = textView(c), let lm = tv.layoutManager,
+           let len = tv.textStorage?.length, NSMaxRange(r) <= len {
+            lm.addTemporaryAttribute(.backgroundColor, value: ManuscriptView.blockColor, forCharacterRange: r)
+            blockShown = (c, r)
+        }
+        for s in sheets.values { s.textView.needsDisplay = true }
     }
 
     /// Scroll so a range sits a little above the middle of the view.
@@ -668,6 +731,7 @@ final class ManuscriptView: NSView, NSTextViewDelegate {
             lm.removeTemporaryAttribute(.foregroundColor, forCharacterRange: all)
         }
         highlighted = []
+        if blockShown != nil { blockShown = nil; refreshWordStar() }
     }
 
     func highlightSearch(_ matches: [(chId: String, range: NSRange)], current: Int?) {
