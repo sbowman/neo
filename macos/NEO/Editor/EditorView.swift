@@ -153,12 +153,9 @@ private struct NavItem: View {
             .font(.system(size: 13))
             .foregroundStyle(hover || current ? Color(hex: 0xEEEEEE) : Color(hex: bright ? 0xCCCCCC : 0xAAAAAA))
             .contentShape(Rectangle())
-            .onTapGesture {
-                session.switchTab(.manuscript)
-                DispatchQueue.main.async { session.manuscript?.focusChapterEnd(chId) }
-            }
+            .onTapGesture { session.jumpToChapter(chId) }
             .onDrag { NSItemProvider(object: (chapterPrefix + chId) as NSString) }
-            .help("Drag to reorder chapters")
+            .help("Click to go to this chapter · drag to reorder")
             KeyField(text: $note, placeholder: "What happens here…",
                      font: .systemFont(ofSize: 12), color: NSColor(hex: bright ? 0x999999 : 0x777777),
                      placeholderColor: NSColor(hex: 0x4A4A4A),
@@ -197,6 +194,7 @@ private struct SidePane: View {
                 .help("Keep this pane open")
             }
             .padding(.horizontal, 16).padding(.bottom, 14)
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 12) {
                     if session.openStickies.isEmpty {
@@ -206,12 +204,16 @@ private struct SidePane: View {
                             .padding(.horizontal, 14).padding(.vertical, 30)
                     }
                     ForEach(session.openStickies) { s in
-                        StickyCard(session: session, sticky: s)
+                        StickyCard(session: session, sticky: s).id(s.id)
                     }
                 }
                 .padding(.horizontal, 12)
             }
             .scrollIndicators(.never)
+            .onChange(of: session.flashStickyId) { _, id in
+                if let id { withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .center) } }
+            }
+            }
         }
         .padding(.top, 36).padding(.bottom, 20)
         .frame(maxHeight: .infinity, alignment: .top)
@@ -224,18 +226,27 @@ private struct StickyCard: View {
     @Bindable var session: BookSession
     let sticky: Sticky
     @State private var text = ""
-    @FocusState private var focused: Bool
+    @State private var glow = false
+    @State private var focusToken = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(session.index(of: sticky.chapterId).map { "CHAPTER \($0 + 1)" } ?? "UNPLACED")
                 .font(.system(size: 10)).tracking(1).foregroundStyle(Color(hex: 0x777777))
-            TextField("What needs doing here?", text: $text, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundStyle(Color(hex: 0xDDDDDD))
-                .lineLimit(2...12)
-                .focused($focused)
+            KeyField(text: $text, placeholder: "What needs doing here?",
+                     font: .systemFont(ofSize: 13), color: NSColor(hex: 0xDDDDDD), placeholderColor: NSColor(hex: 0x6A6A6A),
+                     focusToken: focusToken,
+                     onCommit: {
+                         if session.editingStickyId == sticky.id { session.editingStickyId = nil }
+                     },
+                     onFocus: {
+                         session.editingStickyId = sticky.id
+                         // a note clicked into by hand returns to wherever the caret was
+                         if session.stickyReturn == nil, let tv = session.manuscript?.textView(session.currentChapterId ?? "") {
+                             session.stickyReturn = (tv.chapterId, tv.selectedRange().location)
+                         }
+                     },
+                     onEnter: { session.returnToPage(); return true })
                 .onChange(of: text) { _, v in session.updateSticky(sticky.id, text: v) }
             HStack {
                 Spacer()
@@ -251,12 +262,26 @@ private struct StickyCard: View {
         .overlay(alignment: .leading) {
             UnevenRoundedRectangle(topLeadingRadius: 6, bottomLeadingRadius: 6).fill(NEOColor.red).frame(width: 3)
         }
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(NEOColor.accent, lineWidth: 1.5).opacity(glow ? 1 : 0))
+        .shadow(color: NEOColor.accent.opacity(glow ? 0.45 : 0), radius: 8)
+        .onChange(of: session.flashStickyId) { _, v in
+            guard v == sticky.id else { return }
+            withAnimation(.easeOut(duration: 0.2)) { glow = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                withAnimation(.easeIn(duration: 0.6)) { glow = false }
+                if session.flashStickyId == sticky.id { session.flashStickyId = nil }
+            }
+        }
         .onAppear {
+            if session.flashStickyId == sticky.id {
+                glow = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { withAnimation(.easeIn(duration: 0.6)) { glow = false } }
+            }
             text = sticky.text
-            if session.focusStickyId == sticky.id { focused = true; session.focusStickyId = nil }
+            if session.focusStickyId == sticky.id { focusToken += 1; session.focusStickyId = nil }
         }
         .onChange(of: session.focusStickyId) { _, v in
-            if v == sticky.id { focused = true; session.focusStickyId = nil }
+            if v == sticky.id { focusToken += 1; session.focusStickyId = nil }
         }
     }
 }
@@ -275,7 +300,7 @@ private struct BottomBar: View {
         HStack(spacing: 18) {
             Hoverable { h in Text("⇤ Shelf").foregroundStyle(h ? NEOColor.accent : muted) }
                 .onTapGesture { app.backToShelf() }
-                .help("Back to your bookshelf")
+                .help("Back to your bookshelf (⌘W)")
             Spacer(minLength: 0)
             HStack(spacing: 4) {
                 tab(.manuscript, "Manuscript")
@@ -421,30 +446,81 @@ struct PaperPage<Content: View>: View {
     let title: String
     let theme: PageTheme
     var sidePinned = false
+    var onMarginClick: ((_ right: Bool) -> Void)? = nil
     @ViewBuilder var content: Content
+    @State private var viewport = CGSize(width: 900, height: 700)
 
     var body: some View {
-        GeometryReader { g in
-            ScrollView {
-                VStack(spacing: 0) {
-                    Text(title.uppercased())
-                        .font(.custom("Georgia", size: 14)).tracking(3)
-                        .foregroundStyle(Color(nsColor: theme.night ? NSColor(hex: 0x918B7D) : NSColor(hex: 0x777777)))
-                        .frame(maxWidth: .infinity)
-                        .padding(.bottom, 40)
-                    content
-                }
-                .padding(.horizontal, 72).padding(.top, 70).padding(.bottom, 90)
-                .frame(width: min(680 * theme.zoom, g.size.width * 0.92), alignment: .top)
-                .frame(minHeight: g.size.height * 0.85, alignment: .top)
-                .background(theme.paperColor)
-                .overlay { if let b = theme.sheetBorder { Rectangle().stroke(Color(nsColor: b)) } }
-                .shadow(color: .black.opacity(0.5), radius: 15, y: 4)
-                .padding(.top, 40).padding(.bottom, 120)
-                .frame(maxWidth: .infinity)
-                .offset(x: sidePinned ? -125 : 0)
+        let width = min(680 * theme.zoom, viewport.width * 0.92)
+        PaperScroll(pageWidth: width, pageShift: sidePinned ? 125 : 0, viewport: $viewport) {
+            VStack(spacing: 0) {
+                Text(title.uppercased())
+                    .font(.custom("Georgia", size: 14)).tracking(3)
+                    .foregroundStyle(Color(nsColor: theme.night ? NSColor(hex: 0x918B7D) : NSColor(hex: 0x777777)))
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 40)
+                content
             }
-            .scrollIndicators(.automatic)
+            .padding(.horizontal, 72).padding(.top, 70).padding(.bottom, 90)
+            .frame(width: width, alignment: .top)
+            .frame(minHeight: viewport.height * 0.85, alignment: .top)
+            .background(theme.paperColor)
+            .overlay { if let b = theme.sheetBorder { Rectangle().stroke(Color(nsColor: b)) } }
+            .shadow(color: .black.opacity(0.5), radius: 15, y: 4)
+            .padding(.top, 40).padding(.bottom, 120)
+            .frame(maxWidth: .infinity)
+            .offset(x: sidePinned ? -125 : 0)
+            .background {
+                // the paper sits in front of this, so only margin clicks land here
+                GeometryReader { g in
+                    Color.clear.contentShape(Rectangle())
+                        .onTapGesture(coordinateSpace: .local) { p in
+                            onMarginClick?(p.x > g.size.width / 2 - (sidePinned ? 125 : 0))
+                        }
+                }
+            }
+        }
+    }
+}
+
+/// Takes a click even while the window is in the background, like the rest of the window.
+final class PaperHostingView: NSHostingView<AnyView> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// SwiftUI content on NEO's page scroller, so the Outline and Darlings tabs
+/// scroll exactly like the manuscript: wheel anywhere, scroller beside the page.
+struct PaperScroll<Content: View>: NSViewRepresentable {
+    let pageWidth: CGFloat
+    let pageShift: CGFloat
+    @Binding var viewport: CGSize
+    @ViewBuilder var content: Content
+
+    func makeNSView(context: Context) -> PageScrollView {
+        let s = PageScrollView()
+        s.drawsBackground = false
+        s.hasVerticalScroller = true
+        s.hasHorizontalScroller = false
+        s.autohidesScrollers = true
+        s.scrollerStyle = .overlay
+        s.onZoom = { k in AppModel.shared.zoom(by: k) }
+        let host = PaperHostingView(rootView: AnyView(content))
+        host.translatesAutoresizingMaskIntoConstraints = false
+        s.documentView = host
+        NSLayoutConstraint.activate([
+            host.leadingAnchor.constraint(equalTo: s.contentView.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: s.contentView.trailingAnchor),
+            host.topAnchor.constraint(equalTo: s.contentView.topAnchor)
+        ])
+        return s
+    }
+
+    func updateNSView(_ s: PageScrollView, context: Context) {
+        (s.documentView as? PaperHostingView)?.rootView = AnyView(content)
+        s.pageWidth = pageWidth
+        s.pageShift = pageShift
+        s.onViewport = { size in
+            if abs(size.width - viewport.width) > 0.5 || abs(size.height - viewport.height) > 0.5 { viewport = size }
         }
     }
 }
@@ -455,7 +531,8 @@ private struct OutlinePage: View {
 
     var body: some View {
         let theme = app.theme
-        PaperPage(title: session.meta.outlineTabName, theme: theme, sidePinned: session.sidePinned) {
+        PaperPage(title: session.meta.outlineTabName, theme: theme, sidePinned: session.sidePinned,
+                  onMarginClick: { session.marginClicked(right: $0) }) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(session.meta.chapterOrder.enumerated()), id: \.element) { i, chId in
                     OutlineLine(session: session, chId: chId, secId: nil, label: "\(i + 1)", theme: theme)
@@ -559,7 +636,8 @@ private struct DarlingsPage: View {
 
     var body: some View {
         let theme = app.theme
-        PaperPage(title: "Darlings", theme: theme, sidePinned: session.sidePinned) {
+        PaperPage(title: "Darlings", theme: theme, sidePinned: session.sidePinned,
+                  onMarginClick: { session.marginClicked(right: $0) }) {
             if session.darlings.isEmpty {
                 Text("When a beautiful paragraph is gumming up the works, select it and drag it onto the Darlings tab below.\nIt leaves your manuscript but it is never lost.")
                     .font(.custom("Georgia", size: 15)).italic()

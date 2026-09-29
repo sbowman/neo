@@ -1,13 +1,48 @@
 import AppKit
 import SwiftUI
 
-private final class FlippedView: NSView {
+/// The surface the sheets sit on. A click that lands here missed the paper,
+/// so it's in a margin: the left one shows the chapters, the right one the notes.
+final class MarginView: NSView {
+    var onMarginClick: ((_ right: Bool) -> Void)?
+    /// the page column's horizontal centre, in this view's coordinates
+    var pageMidX: () -> CGFloat = { 0 }
+
     override var isFlipped: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        onMarginClick?(p.x > pageMidX())
+    }
 }
 
 /// Scrolls the page; a pinch or Ctrl+scroll zooms it instead.
+///
+/// The view spans the whole window so the wheel works over the dark margins,
+/// but its scroller sits just right of the page column — nowhere near the
+/// window edges, where hovering opens the side panes.
 final class PageScrollView: NSScrollView {
     var onZoom: ((CGFloat) -> Void)?
+    var onViewport: ((NSSize) -> Void)?
+    /// the page column's width, and how far it is nudged left (for a pinned pane)
+    var pageWidth: CGFloat = 680 { didSet { if oldValue != pageWidth { tile() } } }
+    var pageShift: CGFloat = 0 { didSet { if oldValue != pageShift { tile() } } }
+    private var lastViewport: NSSize = .zero
+
+    override func tile() {
+        super.tile()
+        if let v = verticalScroller {
+            var f = v.frame
+            let pageRight = floor((bounds.width - pageWidth) / 2) - pageShift + pageWidth
+            f.origin.x = min(max(0, pageRight + 30), bounds.width - f.width - 24)
+            v.frame = f
+        }
+        if contentSize != lastViewport {
+            lastViewport = contentSize
+            let size = contentSize
+            DispatchQueue.main.async { [weak self] in self?.onViewport?(size) }
+        }
+    }
 
     override func scrollWheel(with event: NSEvent) {
         if event.modifierFlags.contains(.control) {
@@ -298,6 +333,7 @@ final class ChapterSheetView: SheetView {
 
     /// A click on the paper around the words puts the caret in them.
     override func mouseDown(with event: NSEvent) {
+        textView.session?.pageClicked()
         let p = convert(event.locationInWindow, from: nil)
         window?.makeFirstResponder(textView)
         let len = textView.textStorage?.length ?? 0
@@ -311,7 +347,7 @@ final class ChapterSheetView: SheetView {
 final class ManuscriptView: NSView, NSTextViewDelegate {
     let session: BookSession
     let scroll = PageScrollView()
-    private let doc = FlippedView()
+    private let doc = MarginView()
     let titleSheet: TitleSheetView
     private var sheets: [String: ChapterSheetView] = [:]
     private var order: [String] = []
@@ -332,6 +368,11 @@ final class ManuscriptView: NSView, NSTextViewDelegate {
         scroll.documentView = doc
         scroll.contentView.postsBoundsChangedNotifications = true
         scroll.onZoom = { [weak self] k in self?.session.app.zoom(by: k) }
+        doc.onMarginClick = { [weak session] right in session?.marginClicked(right: right) }
+        doc.pageMidX = { [weak self] in
+            guard let self else { return 0 }
+            return self.doc.bounds.midX - (self.session.sidePinned ? 125 : 0)
+        }
         addSubview(scroll)
         doc.addSubview(titleSheet)
         NotificationCenter.default.addObserver(self, selector: #selector(scrolled),
@@ -427,6 +468,8 @@ final class ManuscriptView: NSView, NSTextViewDelegate {
         let w = pageWidth
         let shift: CGFloat = session.sidePinned ? 125 : 0
         let x = max(8, floor((avail - w) / 2) - shift)
+        scroll.pageWidth = w
+        scroll.pageShift = shift
         let minH = floor(visH * 0.88)
         var y: CGFloat = 40
         titleSheet.frame = NSRect(x: x, y: y, width: w, height: minH)
@@ -546,6 +589,29 @@ final class ManuscriptView: NSView, NSTextViewDelegate {
             let caret = rect(of: s.textView.selectedRange(), in: s.textView)
             if !scroll.contentView.bounds.contains(NSPoint(x: caret.midX, y: caret.maxY)) {
                 center(chId, s.textView.selectedRange())
+            }
+        }
+    }
+
+    /// From the chapter list: the chapter's heading comes to the top of the
+    /// view and the caret waits at the chapter's end, the way the Electron build
+    /// did it (a caret at the start would make the drop cap step aside).
+    func jumpToChapter(_ chId: String) {
+        guard let s = sheets[chId] else { return }
+        layoutSheets()
+        window?.makeFirstResponder(s.textView)
+        s.textView.setSelectedRange(NSRange(location: s.textView.textStorage?.length ?? 0, length: 0))
+        session.currentChapterId = chId
+        let target = min(max(0, s.frame.minY - 20), max(0, doc.frame.height - scroll.contentSize.height))
+        // after any typewriter centring the caret move queued
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.25
+                self.scroll.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: target))
+            } completionHandler: { [weak self] in
+                guard let self else { return }
+                self.scroll.reflectScrolledClipView(self.scroll.contentView)
             }
         }
     }

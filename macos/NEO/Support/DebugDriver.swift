@@ -30,6 +30,7 @@ enum DebugDriver {
     }
 
     private static var app: AppModel { AppModel.shared }
+    private static var clickLog = ""
     private static var window: NSWindow? { NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.frame.width > 400 } }
 
     private static func key(_ chars: String, code: UInt16, mods: NSEvent.ModifierFlags = []) {
@@ -91,7 +92,20 @@ enum DebugDriver {
             let bits = arg.split(separator: " ").map(String.init)
             var mods: NSEvent.ModifierFlags = [.command]
             if bits.contains("shift") { mods.insert(.shift) }
-            if let c = bits.last { key(mods.contains(.shift) ? c.uppercased() : c, code: 0, mods: mods) }
+            // as a physical keyboard sends it: real key code, characters without
+            // Shift, characters-ignoring-modifiers with it
+            let codes: [String: UInt16] = ["a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
+                                           "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "o": 31, "u": 32,
+                                           "i": 34, "p": 35, "l": 37, "j": 38, "k": 40, "n": 45, "m": 46, ";": 41, "/": 44]
+            if let c = bits.last?.lowercased(), let w = window,
+               let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime,
+                                        windowNumber: w.windowNumber, context: nil, characters: c,
+                                        charactersIgnoringModifiers: mods.contains(.shift) ? c.uppercased() : c,
+                                        isARepeat: false, keyCode: codes[c] ?? 0) {
+                // through the event queue, so it meets the app's key monitor and
+                // then the menus, exactly as a keystroke does
+                NSApp.postEvent(e, atStart: false)
+            }
         case "wait":
             try? await Task.sleep(nanoseconds: UInt64((Double(arg) ?? 0.5) * 1_000_000_000))
         case "scroll":
@@ -169,6 +183,136 @@ enum DebugDriver {
                 if let h = FileHandle(forWritingAtPath: bits[1]) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
                 else { try? line.write(toFile: bits[1], atomically: true, encoding: .utf8) }
             }
+        case "hitscroller":
+            // hitscroller <file>: what the window finds under the visible page scroller
+            func scrollers(_ v: NSView) -> [PageScrollView] {
+                (v as? PageScrollView).map { [$0] } ?? v.subviews.flatMap(scrollers)
+            }
+            var out = ""
+            if let root = window?.contentView {
+                for sv in scrollers(root) where !sv.isHiddenOrHasHiddenAncestor && sv.window != nil {
+                    guard let bar = sv.verticalScroller else { continue }
+                    sv.flashScrollers()
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    let edge = sv.convert(NSPoint(x: sv.bounds.maxX - 6, y: sv.bounds.midY), to: nil)
+                    let edgeHit = root.hitTest(root.superview?.convert(edge, from: nil) ?? edge)
+                    out += "window edge hit=\(edgeHit.map { String(describing: type(of: $0)) } ?? "nil")\n"
+                    let p = bar.convert(NSPoint(x: bar.bounds.midX, y: bar.bounds.midY), to: nil)
+                    let hit = root.hitTest(root.superview?.convert(p, from: nil) ?? p)
+                    out += "scroller x=\(Int(bar.frame.minX)) of width \(Int(sv.bounds.width)); hit=\(hit.map { String(describing: type(of: $0)) } ?? "nil") isScroller=\(hit === bar)\n"
+                    // drag the knob down by driving the scroller the way a drag does
+                    let before = sv.contentView.bounds.minY
+                    bar.doubleValue = 0.5
+                    bar.sendAction(bar.action, to: bar.target)
+                    out += "scroll before=\(Int(before)) after=\(Int(sv.contentView.bounds.minY))\n"
+                }
+            }
+            try? out.write(toFile: arg, atomically: true, encoding: .utf8)
+        case "wclick":
+            // wclick <x> <y>: a click routed through the window, as the system delivers it
+            let n = arg.split(separator: " ").compactMap { Double($0) }
+            if let w = window, let content = w.contentView, n.count == 2 {
+                w.makeKey()
+                let p = NSPoint(x: n[0], y: content.bounds.height - n[1])
+                for t in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    if let e = NSEvent.mouseEvent(with: t, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                  windowNumber: w.windowNumber, context: nil, eventNumber: Int.random(in: 1...100000), clickCount: 1, pressure: 1) {
+                        w.sendEvent(e)
+                        try? await Task.sleep(nanoseconds: 60_000_000)
+                    }
+                }
+                clickLog = "window click key=\(w.isKeyWindow)"
+            }
+        case "clickflag":
+            // clickflag <ch>: click the chapter's first flag
+            if let s, let i = Int(arg), let tv = s.manuscript?.textView(s.meta.chapterOrder[i]), let ts = tv.textStorage,
+               let lm = tv.layoutManager, let tc = tv.textContainer, let w = window {
+                var at: Int? = nil
+                ts.enumerateAttribute(.neoMark, in: NSRange(location: 0, length: ts.length)) { v, r, stop in
+                    if v != nil { at = r.location; stop.pointee = true }
+                }
+                guard let at else { return }
+                let r = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: NSRange(location: at, length: 1), actualCharacterRange: nil), in: tc)
+                let p = tv.convert(NSPoint(x: r.midX + tv.textContainerOrigin.x, y: r.midY + tv.textContainerOrigin.y), to: nil)
+                if let down = NSEvent.mouseEvent(with: .leftMouseDown, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                 windowNumber: w.windowNumber, context: nil, eventNumber: Int.random(in: 1...99999), clickCount: 1, pressure: 1),
+                   let up = NSEvent.mouseEvent(with: .leftMouseUp, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                               windowNumber: w.windowNumber, context: nil, eventNumber: Int.random(in: 1...99999), clickCount: 1, pressure: 1) {
+                    NSApp.postEvent(up, atStart: false)
+                    tv.mouseDown(with: down)
+                }
+                clickLog = "flag at \(at); selection now \(tv.selectedRange()); first responder is page: \(w.firstResponder === tv)"
+            }
+        case "click":
+            // click <x> <y>: a mouse click, in points from the window content's top-left
+            let n = arg.split(separator: " ").compactMap { Double($0) }
+            if let w = window, let content = w.contentView, n.count == 2 {
+                // straight to the view under the pointer: a background window would
+                // otherwise spend the click on becoming key
+                let p = NSPoint(x: n[0], y: content.bounds.height - n[1])
+                func ev(_ t: NSEvent.EventType) -> NSEvent? {
+                    NSEvent.mouseEvent(with: t, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                       windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+                }
+                guard let down = ev(.leftMouseDown), let up = ev(.leftMouseUp),
+                      let hit = content.hitTest(content.superview?.convert(p, from: nil) ?? p) else { return }
+                NSApp.postEvent(up, atStart: false)   // for views that track the mouse until it's released
+                hit.mouseDown(with: down)
+                if !(hit is NSTextView) { hit.mouseUp(with: up) }
+                let local = hit.convert(down.locationInWindow, from: nil)
+                clickLog = "hit \(type(of: hit)) window=\(w.frame.size) content=\(content.bounds.size) local=\(local) mid=\((hit as? MarginView)?.pageMidX() ?? -1)"
+            }
+        case "menus":
+            // menus <file>: every menu item with a key equivalent
+            var out = ""
+            func walk(_ m: NSMenu, _ path: String) {
+                for it in m.items {
+                    if !it.keyEquivalent.isEmpty || path.hasPrefix("File") {
+                        out += "\(it.isEnabled ? "on " : "OFF")  \(path)\(it.title)  [\(it.keyEquivalentModifierMask.contains(.command) ? "⌘" : "")\(it.keyEquivalentModifierMask.contains(.shift) ? "⇧" : "")\(it.keyEquivalent)]\n"
+                    }
+                    if let sub = it.submenu { walk(sub, path + it.title + " > ") }
+                }
+            }
+            NSApp.setWindowsNeedUpdate(true)
+            NSApp.updateWindows()
+            NotificationCenter.default.post(name: NSApplication.willUpdateNotification, object: NSApp)
+            NotificationCenter.default.post(name: NSApplication.didUpdateNotification, object: NSApp)
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            func update(_ m: NSMenu) { m.update(); for it in m.items { if let sub = it.submenu { update(sub) } } }
+            if let m = NSApp.mainMenu { update(m); walk(m, "") }
+            try? out.write(toFile: arg, atomically: true, encoding: .utf8)
+        case "keqprobe":
+            // keqprobe <file>: which spelling of ⌘⇧X does the menu accept?
+            var out = ""
+            if let w = window, let m = NSApp.mainMenu {
+                func find(_ menu: NSMenu) -> NSMenuItem? {
+                    for it in menu.items {
+                        if it.title == "Placeholder Note" { return it }
+                        if let sub = it.submenu, let f = find(sub) { return f }
+                    }
+                    return nil
+                }
+                if let it = find(m) {
+                    it.menu?.update()
+                    out += "item keyEquivalent=[\(it.keyEquivalent)] mask=\(it.keyEquivalentModifierMask.rawValue) enabled=\(it.isEnabled) target=\(String(describing: it.target)) action=\(String(describing: it.action))\n"
+                }
+                if let it = find(m), let a = it.action {
+                    let before = app.session?.stickies.count ?? -1
+                    let sent = NSApp.sendAction(a, to: it.target, from: it)
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    out += "menu action sent=\(sent) stickies \(before)->\(app.session?.stickies.count ?? -1) toast=\(app.toast ?? "-") firstResponder=\(w.firstResponder.map { String(describing: type(of: $0)) } ?? "-")\n"
+                }
+                for (chars, ign) in [("x", "X"), ("X", "X"), ("x", "x"), ("X", "x")] {
+                    let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command, .shift], timestamp: ProcessInfo.processInfo.systemUptime,
+                                             windowNumber: w.windowNumber, context: nil, characters: chars,
+                                             charactersIgnoringModifiers: ign, isARepeat: false, keyCode: 7)!
+                    let before = app.session?.stickies.count ?? -1
+                    let handled = m.performKeyEquivalent(with: e)
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    out += "chars=\(chars) ignoring=\(ign): handled=\(handled) stickies \(before)->\(app.session?.stickies.count ?? -1)\n"
+                }
+            }
+            try? out.write(toFile: arg, atomically: true, encoding: .utf8)
         case "flush":
             s?.flushAll()
         case "shot":
@@ -186,6 +330,18 @@ enum DebugDriver {
                     out += "--- chapter \(i + 1) [\(id)] title=\(s.meta.chapterTitles[id] ?? "")\n"
                     if let ch = s.chapter(id) { out += HTMLCodec.html(from: ch.storage) + "\n" }
                 }
+                out += "last click: \(clickLog)\n"
+                out += "search visible: \(s.searchVisible)\n"
+                if let tv = window?.firstResponder as? ChapterTextView {
+                    let str = (tv.textStorage?.string ?? "") as NSString
+                    let loc = tv.selectedRange().location
+                    let around = str.substring(with: NSRange(location: max(0, loc - 12), length: min(24, str.length - max(0, loc - 12))))
+                    out += "caret: \(tv.chapterId) at \(loc) …\(around.replacingOccurrences(of: "\n", with: "¶"))…\n"
+                } else {
+                    out += "caret: none\n"
+                }
+                out += "first responder: \(window?.firstResponder.map { String(describing: type(of: $0)) } ?? "-") editingSticky=\(s.editingStickyId ?? "-")\n"
+                out += "panes: nav=\(s.navOpen) side=\(s.sideOpen) current=\(s.currentChapterId ?? "-") scroll=\(Int(s.manuscript?.scrollOffset ?? -1))\n"
                 out += "--- stickies\n" + s.stickies.map { "\($0.id) ch=\($0.chapterId ?? "-") resolved=\($0.resolved) \($0.text)" }.joined(separator: "\n")
                 out += "\n--- darlings\n" + s.darlings.map { "\($0.id) \($0.chapterLabel) pre=[\($0.anchorPrefix ?? "")] suf=[\($0.anchorSuffix ?? "")] html=\($0.html ?? "")" }.joined(separator: "\n")
                 out += "\n--- undo stack: \(s.undoStack.map(\.label))\n"

@@ -20,6 +20,25 @@ struct NEOApp: App {
     }
 }
 
+/// What the menus depend on. SwiftUI menus don't follow @Observable state,
+/// so AppModel pushes changes here and the commands observe it the
+/// supported way.
+@MainActor
+final class MenuModel: ObservableObject {
+    static let shared = MenuModel()
+    @Published var hasBook = false
+    @Published var theme = PageTheme.default
+    @Published var typewriter = false
+    @Published var bright = false
+
+    func refresh(_ app: AppModel) {
+        if hasBook != (app.session != nil) { hasBook = app.session != nil }
+        if theme != app.theme { theme = app.theme }
+        if typewriter != app.library.typewriter { typewriter = app.library.typewriter }
+        if bright != app.library.uiBright { bright = app.library.uiBright }
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var monitor: Any?
 
@@ -34,6 +53,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if (e.keyCode == 36 || e.keyCode == 76) && mods == .command {
                 MainActor.assumeIsolated { AppModel.shared.toggleFullScreen() }
                 return nil
+            }
+            // ⌘⇧X (placeholder note) and ⌘⇧D (send to Darlings), matched by the
+            // physical key so they fire whatever the keyboard layout reports
+            if mods == [.command, .shift] && (e.keyCode == 7 || e.keyCode == 2) {
+                let placeholder = e.keyCode == 7
+                let handled = MainActor.assumeIsolated { () -> Bool in
+                    let app = AppModel.shared
+                    guard app.modal == nil else { return false }
+                    app.withBook { placeholder ? $0.insertPlaceholder() : $0.darlingFromKeyboard() }
+                    return true
+                }
+                return handled ? nil : e
             }
             return e
         }
@@ -74,6 +105,7 @@ private struct WindowConfigurator: NSViewRepresentable {
 
 struct NEOCommands: Commands {
     let app: AppModel
+    @ObservedObject private var state = MenuModel.shared
 
     private func send(_ sel: Selector) { NSApp.sendAction(sel, to: nil, from: nil) }
 
@@ -95,18 +127,19 @@ struct NEOCommands: Commands {
                 Button("Word (.docx)") { app.export("docx") }
                 Button("EPUB (.epub)") { app.export("epub") }
             }
-            .disabled(app.session == nil)
             Divider()
             Button("Email Draft to Myself") { app.emailDraft() }
                 .keyboardShortcut("e", modifiers: .command)
-                .disabled(app.session == nil)
-            Button("Email Settings…") { Task { _ = await app.emailSettings() } }
+                Button("Email Settings…") { Task { _ = await app.emailSettings() } }
             Divider()
             Button("Import Manuscripts…") { app.pickImport() }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
             Divider()
-            Button("Back to Shelf") { app.backToShelf() }
-                .disabled(app.session == nil)
+            // ⌘W closes the book and returns to the shelf; on the shelf it closes the window
+            Button("Close") {
+                if app.session != nil { app.backToShelf() } else { NSApp.keyWindow?.performClose(nil) }
+            }
+            .keyboardShortcut("w", modifiers: .command)
         }
         CommandGroup(replacing: .undoRedo) {
             Button("Undo") { app.undo() }
@@ -115,20 +148,16 @@ struct NEOCommands: Commands {
                 .keyboardShortcut("z", modifiers: [.command, .shift])
         }
         CommandGroup(replacing: .textEditing) {
-            Button("Find & Replace") { app.session?.openSearch() }
+            Button("Find & Replace") { app.withBook { $0.openSearch() } }
                 .keyboardShortcut("f", modifiers: .command)
-                .disabled(app.session == nil)
-            Button("Spellcheck Pass") { app.session?.toggleSpellcheck() }
+                Button("Spellcheck Pass") { app.withBook { $0.toggleSpellcheck() } }
                 .keyboardShortcut(";", modifiers: .command)
-                .disabled(app.session == nil)
-            Divider()
-            Button("Placeholder Note") { app.session?.insertPlaceholder() }
+                Divider()
+            Button("Placeholder Note") { app.withBook { $0.insertPlaceholder() } }
                 .keyboardShortcut("x", modifiers: [.command, .shift])
-                .disabled(app.session == nil)
-            Button("Send Selection to Darlings") { app.session?.darlingFromKeyboard() }
+                Button("Send Selection to Darlings") { app.withBook { $0.darlingFromKeyboard() } }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
-                .disabled(app.session == nil)
-        }
+            }
         CommandMenu("Format") {
             Button("Bold") { send(#selector(ProseTextView.neoToggleBold(_:))) }
                 .keyboardShortcut("b", modifiers: .command)
@@ -137,20 +166,19 @@ struct NEOCommands: Commands {
             Divider()
             Menu("Body Font") {
                 ForEach(NEOFonts.bodyNames, id: \.self) { f in
-                    Toggle(f, isOn: Binding(get: { app.theme.bodyFont == f }, set: { _ in app.setBodyFont(f) }))
+                    Toggle(f, isOn: Binding(get: { state.theme.bodyFont == f }, set: { _ in app.setBodyFont(f) }))
                 }
             }
             Menu("Drop Cap Style") {
                 ForEach(NEOFonts.dropCapStyles, id: \.key) { d in
-                    Toggle(d.label, isOn: Binding(get: { app.theme.dropCap == d.key }, set: { _ in app.setDropCap(d.key) }))
+                    Toggle(d.label, isOn: Binding(get: { state.theme.dropCap == d.key }, set: { _ in app.setDropCap(d.key) }))
                 }
             }
             Menu("Align Paragraph") {
                 ForEach(["Left", "Center", "Right", "Justify"], id: \.self) { a in
-                    Button(a) { app.session?.applyAlign(a.lowercased()) }
+                    Button(a) { app.withBook { $0.applyAlign(a.lowercased()) } }
                 }
             }
-            .disabled(app.session == nil)
             Divider()
             Button("Larger Text") { app.changeFontSize(1) }
                 .keyboardShortcut("=", modifiers: .command)
@@ -159,7 +187,7 @@ struct NEOCommands: Commands {
             Button("Reset Text Size") { app.changeFontSize(0) }
                 .keyboardShortcut("0", modifiers: .command)
             Divider()
-            Toggle("Typewriter Scrolling", isOn: Binding(get: { app.library.typewriter }, set: { _ in app.toggleTypewriter() }))
+            Toggle("Typewriter Scrolling", isOn: Binding(get: { state.typewriter }, set: { _ in app.toggleTypewriter() }))
                 .keyboardShortcut("t", modifiers: [.command, .shift])
         }
         CommandGroup(after: .toolbar) {
@@ -167,10 +195,10 @@ struct NEOCommands: Commands {
                 .keyboardShortcut("f", modifiers: [.command, .shift])
             Divider()
             Menu("Page") {
-                Toggle("Night", isOn: Binding(get: { app.theme.night }, set: { _ in app.setPageTheme("night") }))
-                Toggle("Paper", isOn: Binding(get: { !app.theme.night }, set: { _ in app.setPageTheme("paper") }))
+                Toggle("Night", isOn: Binding(get: { state.theme.night }, set: { _ in app.setPageTheme("night") }))
+                Toggle("Paper", isOn: Binding(get: { !state.theme.night }, set: { _ in app.setPageTheme("paper") }))
             }
-            Toggle("Brighter Interface", isOn: Binding(get: { app.library.uiBright }, set: { _ in app.toggleBright() }))
+            Toggle("Brighter Interface", isOn: Binding(get: { state.bright }, set: { _ in app.toggleBright() }))
         }
         CommandGroup(replacing: .help) {
             Button("NEO Shortcuts") { app.modal = .help }

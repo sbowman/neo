@@ -102,11 +102,14 @@ final class ChapterTextView: ProseTextView, NSLayoutManagerDelegate {
 
     override func mouseDown(with event: NSEvent) {
         session?.enterRun = 0
-        // a flag opens its note
+        // a flag shows its note — and leaves the text alone: no caret move, no
+        // selection, focus stays on the page (so the drop cap doesn't jump)
         if let ci = characterIndex(atWindowPoint: event.locationInWindow),
            let sid = textStorage?.attribute(.neoMark, at: ci, effectiveRange: nil) as? String {
-            session?.focusSticky(sid)
+            session?.showSticky(sid)
+            return
         }
+        session?.pageClicked()
         super.mouseDown(with: event)
         // clicking an outline ghost selects it, ready to be written over
         guard let ts = textStorage, selectedRange().length == 0, event.clickCount == 1 else { return }

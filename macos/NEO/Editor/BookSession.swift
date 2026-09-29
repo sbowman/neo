@@ -60,6 +60,11 @@ final class BookSession {
     var sidePinned = false
     var draggingText = false
     var focusStickyId: String?
+    var flashStickyId: String?
+    /// the note that has the keyboard, if any (Esc and Return in it go back to the page)
+    var editingStickyId: String?
+    /// where the caret goes when the writer is done with a note
+    @ObservationIgnored var stickyReturn: (chId: String, loc: Int)?
     var outlineFocus: OutlineFocus?
     var spellOn = false
 
@@ -78,6 +83,9 @@ final class BookSession {
     @ObservationIgnored var breakRun = 0
     @ObservationIgnored var enterRun = 0
     @ObservationIgnored var dragOrigin: (chId: String, range: NSRange)?
+    /// the caret's latest home in the manuscript, kept as it moves; saved as
+    /// paragraph + offset when the book is flushed
+    @ObservationIgnored var caretSpot: (chId: String, loc: Int)?
     @ObservationIgnored private var timers: [String: DispatchWorkItem] = [:]
     @ObservationIgnored private var normalizers: [ObjectIdentifier: StorageNormalizer] = [:]
     @ObservationIgnored private var tabScroll: [EditorTab: CGFloat] = [:]
@@ -161,8 +169,12 @@ final class BookSession {
             switchTab(.outline)
         } else if isNew {
             DispatchQueue.main.async { self.manuscript?.focusTitle() }
+        } else if let c = meta.lastCaret, meta.chapterOrder.contains(c.chapterId) {
+            // pick up right where you left off: the caret where it was, the page as it was
+            currentChapterId = meta.lastChapterId.flatMap { meta.chapterOrder.contains($0) ? $0 : nil } ?? c.chapterId
+            let caret = Caret(chId: c.chapterId, pIdx: c.paragraph, off: c.offset, scroll: CGFloat(meta.lastScroll))
+            DispatchQueue.main.async { self.manuscript?.restoreCaret(caret) }
         } else if let last = meta.lastChapterId, meta.chapterOrder.contains(last) {
-            // pick up right where you left off
             currentChapterId = last
             let scroll = CGFloat(meta.lastScroll)
             DispatchQueue.main.async {
@@ -238,6 +250,12 @@ final class BookSession {
         if let m = manuscript {
             meta.lastChapterId = currentChapterId
             meta.lastScroll = Double(tab == .manuscript ? m.scrollOffset : (tabScroll[.manuscript] ?? m.scrollOffset))
+        }
+        if let c = caretSpot, let ch = chapter(c.chId) {
+            let str = ch.storage.string as NSString
+            let loc = min(c.loc, str.length)
+            let p = Prose.paragraph(str, at: loc)
+            meta.lastCaret = (c.chId, Prose.paragraphIndex(str, at: loc), loc - p.location)
         }
         for ch in chapters where ch.dirty { saveChapter(ch.id) }
         flushNotes()
@@ -390,6 +408,33 @@ final class BookSession {
     func titleEnter() {
         if meta.chapterOrder.isEmpty { newChapter() }
         else { manuscript?.focusChapterEnd(meta.chapterOrder[0]) }
+    }
+
+    // MARK: - Side panes
+
+    /// A click in the margin beside the page: the right one slides out the
+    /// notes, the left one the chapters. A second click puts it away.
+    func marginClicked(right: Bool) {
+        if right {
+            if sidePinned { return }
+            sideOpen.toggle()
+            navOpen = false
+        } else {
+            navOpen.toggle()
+            if !sidePinned { sideOpen = false }
+        }
+    }
+
+    /// Back to the page: unpinned panes get out of the way.
+    func pageClicked() {
+        if navOpen { navOpen = false }
+        if sideOpen && !sidePinned { sideOpen = false }
+    }
+
+    func jumpToChapter(_ chId: String) {
+        navOpen = false
+        switchTab(.manuscript)
+        DispatchQueue.main.async { self.manuscript?.jumpToChapter(chId) }
     }
 
     // MARK: - Tabs

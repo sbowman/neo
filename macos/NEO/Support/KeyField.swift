@@ -14,6 +14,7 @@ struct KeyField: NSViewRepresentable {
     var focusToken: Int = 0
     var selectAllOnFocus = false
     var onCommit: (() -> Void)? = nil          // editing ended (blur)
+    var onFocus: (() -> Void)? = nil           // the field took the keyboard
     var onEnter: (() -> Bool)? = nil
     var onShiftEnter: (() -> Bool)? = nil
     var onTab: (() -> Bool)? = nil
@@ -24,6 +25,14 @@ struct KeyField: NSViewRepresentable {
 
     final class Field: NSTextField {
         var lastFocusToken = 0
+        var onFocus: (() -> Void)?
+
+        override func becomeFirstResponder() -> Bool {
+            let ok = super.becomeFirstResponder()
+            if ok { onFocus?() }
+            return ok
+        }
+
         override var intrinsicContentSize: NSSize {
             guard cell?.wraps == true, bounds.width > 0 else { return super.intrinsicContentSize }
             let h = cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: bounds.width, height: CGFloat.greatestFiniteMagnitude)).height ?? 20
@@ -54,6 +63,7 @@ struct KeyField: NSViewRepresentable {
 
     func updateNSView(_ f: Field, context: Context) {
         context.coordinator.parent = self
+        f.onFocus = onFocus
         if f.currentEditor() == nil && f.stringValue != text { f.stringValue = text }
         f.font = font
         f.textColor = color

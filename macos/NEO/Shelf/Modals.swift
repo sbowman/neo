@@ -482,7 +482,7 @@ struct HelpModal: View {
         ("Writing", [
             ("Enter ×2", "Section break (***)"),
             ("Enter ×3", "New chapter, auto-numbered"),
-            ("⌘⇧X", "Placeholder note"),
+            ("⌘⇧X", "Placeholder note — type it, then Return (or Esc) to keep writing"),
             ("⌘⇧D", "Send the selected passage to Darlings"),
             ("⌘Z", "Undo — including big moves (chapter splits and deletes, replace-all, darlings)"),
             ("-- and ...", "Become an em dash — and a true ellipsis …"),
@@ -491,7 +491,8 @@ struct HelpModal: View {
         ("Getting around", [
             ("⌘F", "Find & replace across the whole book"),
             ("Hover edges", "Left: chapters & outline notes. Right: comments (☉ pins)."),
-            ("Esc", "Closes whatever’s open; otherwise back to the shelf")
+            ("⌘W", "Close the book — back to the shelf"),
+            ("Esc", "Closes whatever’s open: a dialog, a note, the find bar, full screen")
         ]),
         ("Modes", [
             ("⌘⇧F · ⌘↩", "Full screen (Esc leaves)"),

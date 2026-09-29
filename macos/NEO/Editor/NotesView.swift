@@ -3,6 +3,13 @@ import SwiftUI
 
 /// The Notes tab's writing surface.
 final class NotesTextView: ProseTextView {
+    weak var session: BookSession?
+
+    override func mouseDown(with event: NSEvent) {
+        session?.pageClicked()
+        super.mouseDown(with: event)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if textStorage?.length == 0 {
@@ -18,7 +25,7 @@ final class NotesTextView: ProseTextView {
 final class NotesPageView: NSView, NSTextViewDelegate {
     let session: BookSession
     private let scroll = PageScrollView()
-    private let doc = FlippedDoc()
+    private let doc = MarginView()
     private let sheet = SheetView()
     private let heading = NSTextField(labelWithString: "")
     private let storage: NSTextStorage
@@ -40,6 +47,7 @@ final class NotesPageView: NSView, NSTextViewDelegate {
         super.init(frame: .zero)
 
         textView.mode = .notes
+        textView.session = session
         textView.themeProvider = { [weak session] in session?.theme ?? .default }
         textView.isVerticallyResizable = true
         textView.minSize = NSSize(width: 0, height: 300)
@@ -55,6 +63,11 @@ final class NotesPageView: NSView, NSTextViewDelegate {
         scroll.scrollerStyle = .overlay
         scroll.documentView = doc
         scroll.onZoom = { [weak session] k in session?.app.zoom(by: k) }
+        doc.onMarginClick = { [weak session] right in session?.marginClicked(right: right) }
+        doc.pageMidX = { [weak self] in
+            guard let self else { return 0 }
+            return self.doc.bounds.midX - (self.session.sidePinned ? 125 : 0)
+        }
         addSubview(scroll)
         doc.addSubview(sheet)
         sheet.addSubview(heading)
@@ -96,6 +109,8 @@ final class NotesPageView: NSView, NSTextViewDelegate {
         let t = session.theme
         let w = floor(min(680 * t.zoom, avail * 0.92))
         let x = max(8, floor((avail - w) / 2) - (session.sidePinned ? 125 : 0))
+        scroll.pageWidth = w
+        scroll.pageShift = session.sidePinned ? 125 : 0
         heading.frame = NSRect(x: 72, y: 70, width: w - 144, height: 20)
         let tw = w - 144
         if abs(textView.frame.width - tw) > 0.5 { textView.setFrameSize(NSSize(width: tw, height: textView.frame.height)) }
@@ -119,7 +134,6 @@ final class NotesPageView: NSView, NSTextViewDelegate {
     func undoManager(for view: NSTextView) -> UndoManager? { window?.undoManager }
 }
 
-private final class FlippedDoc: NSView { override var isFlipped: Bool { true } }
 
 struct NotesHost: NSViewRepresentable {
     let session: BookSession

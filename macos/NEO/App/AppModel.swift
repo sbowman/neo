@@ -37,8 +37,8 @@ enum Modal: Identifiable {
 final class AppModel {
     static let shared = AppModel()
 
-    var library: Library
-    var session: BookSession?
+    var library: Library { didSet { MenuModel.shared.refresh(self) } }
+    var session: BookSession? { didSet { MenuModel.shared.refresh(self) } }
     var metas: [String: BookMeta] = [:]
     var modal: Modal?
     var toast: String?
@@ -52,6 +52,13 @@ final class AppModel {
         reloadMetas()
         if !lib.firstRunDone { modal = .firstRun }
         LibraryStore.dailyBackup()
+        // back into the book that was open when NEO last quit, at the same place
+        if lib.firstRunDone, let id = lib.lastOpenBookId {
+            DispatchQueue.main.async {
+                if LibraryStore.readMeta(id) != nil { self.open(id) }
+                else { self.library.lastOpenBookId = nil; self.saveLibrary() }
+            }
+        }
         // flush the open book every 20 seconds
         flushTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { _ in
             MainActor.assumeIsolated { AppModel.shared.session?.flushAll() }
@@ -311,12 +318,18 @@ final class AppModel {
         }
         session?.close()
         session = BookSession(app: self, meta: meta)
+        if library.lastOpenBookId != bookId {
+            library.lastOpenBookId = bookId
+            saveLibrary()
+        }
     }
 
     func backToShelf() {
         guard let s = session else { return }
         s.close()
         session = nil
+        library.lastOpenBookId = nil
+        saveLibrary()
         reloadMetas()
     }
 
@@ -596,18 +609,23 @@ final class AppModel {
 
     // MARK: - Keys that work everywhere
 
-    /// Esc closes whatever's open; otherwise leaves full screen; otherwise
-    /// walks back to the shelf.
+    /// Esc closes whatever's open (a dialog, a note, the find bar), otherwise
+    /// leaves full screen. Closing the book is ⌘W.
     func handleEscape() -> Bool {
         if modal != nil { dismissModal(); return true }
+        if let s = session, s.editingStickyId != nil { s.returnToPage(); return true }
         if let s = session, s.searchVisible { s.closeSearch(); return true }
         if let w = NSApp.keyWindow, w.styleMask.contains(.fullScreen) { w.toggleFullScreen(nil); return true }
-        if session != nil { backToShelf(); return true }
         return false
     }
 
     func toggleFullScreen() {
         (NSApp.keyWindow ?? NSApp.windows.first)?.toggleFullScreen(nil)
+    }
+
+    /// A book-only command: runs against the open book, or says there isn't one.
+    func withBook(_ f: (BookSession) -> Void) {
+        if let s = session { f(s) } else { showToast("Open a book first") }
     }
 
     func undo() {

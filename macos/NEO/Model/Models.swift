@@ -84,6 +84,7 @@ struct Library {
     var uiBright: Bool
     var emailAddress: String?
     var emailMethod: String?       // "mail" | "gmail"
+    var lastOpenBookId: String?    // the book that was open at quit, reopened at launch
 
     static func seed() -> Library {
         Library([
@@ -122,6 +123,7 @@ struct Library {
         uiBright = d.bool("uiBright") ?? false
         emailAddress = d.string("emailAddress")
         emailMethod = d.string("emailMethod")
+        lastOpenBookId = d.string("lastOpenBookId")
     }
 
     var json: JSONDict {
@@ -151,6 +153,7 @@ struct Library {
         d["uiBright"] = uiBright
         d.set("emailAddress", emailAddress)
         d.set("emailMethod", emailMethod)
+        d.set("lastOpenBookId", lastOpenBookId)
         return d
     }
 
@@ -203,6 +206,8 @@ struct BookMeta {
     var dailyCounts: [String: DailyCount]
     var lastChapterId: String?
     var lastScroll: Double
+    /// where the caret was: its chapter, paragraph, and offset in that paragraph
+    var lastCaret: (chapterId: String, paragraph: Int, offset: Int)?
     var wordCount: Int?
     var coverImage: String?
 
@@ -233,6 +238,9 @@ struct BookMeta {
         let lp = d.dict("lastPosition") ?? [:]
         lastChapterId = lp.string("chapterId")
         lastScroll = lp.double("scroll") ?? 0
+        if let c = lp.string("caretChapterId"), let p = lp.int("caretParagraph"), let o = lp.int("caretOffset") {
+            lastCaret = (c, p, o)
+        }
         wordCount = d.int("wordCount")
         coverImage = d.string("coverImage")
     }
@@ -252,6 +260,11 @@ struct BookMeta {
         d["dailyCounts"] = dailyCounts.mapValues { ["start": $0.start, "end": $0.end] }
         var lp: JSONDict = ["scroll": lastScroll]
         lp.set("chapterId", lastChapterId)
+        if let c = lastCaret {
+            lp["caretChapterId"] = c.chapterId
+            lp["caretParagraph"] = c.paragraph
+            lp["caretOffset"] = c.offset
+        }
         d["lastPosition"] = lp
         d.set("wordCount", wordCount)
         d.set("coverImage", coverImage)

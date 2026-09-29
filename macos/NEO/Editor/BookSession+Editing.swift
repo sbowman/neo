@@ -215,6 +215,7 @@ extension BookSession {
     func selectionChanged(_ tv: ChapterTextView) {
         if currentChapterId != tv.chapterId { currentChapterId = tv.chapterId }
         let r = tv.selectedRange()
+        caretSpot = (tv.chapterId, r.location)
         if r.length > 0, let ch = chapter(tv.chapterId) {
             let n = countWords(ch.storage.attributedSubstring(from: r).string.replacingOccurrences(of: Prose.mark, with: ""))
             selectedWords = n > 0 ? n : nil
@@ -247,6 +248,23 @@ extension BookSession {
         stickies.append(Sticky(id: sid, chapterId: chId))
         saveStickies()
         flaggedChapters.insert(chId)
+        // the note opens beside the page, ready for what needs doing here
+        stickyReturn = (chId, at + 2)
+        focusSticky(sid)
+    }
+
+    /// Return or Esc in a note: back to writing, right where the caret was.
+    func returnToPage() {
+        editingStickyId = nil
+        if !sidePinned { sideOpen = false }
+        switchTab(.manuscript)
+        if let r = stickyReturn, let tv = manuscript?.textView(r.chId), let len = tv.textStorage?.length {
+            tv.window?.makeFirstResponder(tv)
+            tv.setSelectedRange(NSRange(location: min(r.loc, len), length: 0))
+        } else {
+            manuscript?.focusCurrent()
+        }
+        stickyReturn = nil
     }
 
     var openStickies: [Sticky] { stickies.filter { !$0.resolved } }
@@ -294,6 +312,13 @@ extension BookSession {
         DispatchQueue.main.async {
             self.manuscript?.reveal(chId, NSRange(location: loc + 1, length: 0), select: true)
         }
+    }
+
+    /// A flag was clicked: the notes pane opens and that note says hello.
+    func showSticky(_ sid: String) {
+        sideOpen = true
+        flashStickyId = nil
+        DispatchQueue.main.async { self.flashStickyId = sid }
     }
 
     func focusSticky(_ sid: String) {
