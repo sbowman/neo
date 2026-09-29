@@ -131,31 +131,21 @@ Everything lives in `~/Documents/NEO Library` — one folder per book, chapters 
 
 ## Building from source (for the eggheads):
 
-Requires [Node.js](https://nodejs.org).
+Requires Xcode.
+
 
 ```
-git clone https://github.com/hughhowey/neo.git
+git clone https://github.com/sbowman/neo.git
 cd neo
-npm install
-npm start
+xcodebuild -project macos/NEO.xcodeproj -scheme NEO -configuration Release -derivedDataPath macos/build build
+ditto macos/build/Build/Products/Release/NEO.app "/Applications/NEO NativeNative
 ```
 
 To build installers: `npm install electron-builder --save-dev`, then `npm run package` (macOS), `npm run package:win` (Windows), or `npm run package:all`. Output lands in `dist/`.
 
 The app is very simple: an Electron shell (`main.js`), a preload bridge (`preload.js`), and a renderer (`app.js` + `styles.css` + `index.html`). If you know JavaScript, you can change NEO. Have at it.
 
-## Roadmap (things I'm dreaming up but may never get to):
-
-Chapter version history · manuscript format for agent submissions (Times New Roman, double-spaced, address block, just to make Kristin Nelson happy) · global end matter that updates every book at once (same for copyright pages, bios, etc).
-
-## Contributing
-
-Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Fair warning: NEO is opinionated by design, and bloat killed every writing app I've ever tried. If you want complex, try Scrivener. It really is a great application beloved by many! There are so many wonderful writing apps out there! Nobody needs to use this but me.
-
 ## License
 
 [MIT](LICENSE) — free to use, free to modify, free to share.
 
-## Philosophy
-
-If you didn't know, I opened up the Silo universe to fan fiction years ago. And not just to put on fan fiction sites, but you can charge money for the things you write and keep every penny of the income! Lots of incredible Silo Stories out there. But readers are forever looking for more.
