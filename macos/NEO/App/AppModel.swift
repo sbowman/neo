@@ -347,8 +347,10 @@ final class AppModel {
         panel.title = "Choose cover art"
         panel.message = "A 2:3 image works best."
         panel.allowedContentTypes = [.png, .jpeg, .webP, .heic, .tiff]
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        setCover(meta.id, url)
+        Task {
+            guard await present(panel), let url = panel.url else { return }
+            setCover(meta.id, url)
+        }
     }
 
     func removeCover(_ meta: BookMeta) {
@@ -423,8 +425,10 @@ final class AppModel {
         panel.title = "Bring your manuscripts home"
         panel.allowsMultipleSelection = true
         panel.allowedContentTypes = Importer.extensions.compactMap { UTType(filenameExtension: $0) }
-        guard panel.runModal() == .OK else { return }
-        importFiles(panel.urls, shelfId: visibleShelves.first?.id ?? library.shelves.first?.id)
+        Task {
+            guard await present(panel) else { return }
+            importFiles(panel.urls, shelfId: visibleShelves.first?.id ?? library.shelves.first?.id)
+        }
     }
 
     /// Parsed manuscripts become books on a shelf.
@@ -475,12 +479,26 @@ final class AppModel {
         return Exporter.Book(id: s.meta.id, title: s.meta.title, subtitle: s.meta.subtitle, author: s.meta.author, sections: sections)
     }
 
-    private func savePanel(_ name: String, _ ext: String) -> URL? {
+    /// File panels slide down from NEO's window as sheets — resizable,
+    /// expandable to the full browser, and they remember both.
+    @discardableResult
+    private func present(_ panel: NSSavePanel) async -> Bool {
+        panel.canCreateDirectories = true
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible }) else {
+            return panel.runModal() == .OK
+        }
+        return await withCheckedContinuation { c in
+            panel.beginSheetModal(for: window) { r in c.resume(returning: r == .OK) }
+        }
+    }
+
+    private func savePanel(_ name: String, _ ext: String) async -> URL? {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = name + "." + ext
         panel.directoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        panel.isExtensionHidden = false
         if let t = UTType(filenameExtension: ext) { panel.allowedContentTypes = [t] }
-        return panel.runModal() == .OK ? panel.url : nil
+        return await present(panel) ? panel.url : nil
     }
 
     func export(_ format: String) {
@@ -491,7 +509,9 @@ final class AppModel {
     }
 
     func write(_ d: Exporter.Book, format: String, coverFor: (String?, String?), to target: URL? = nil) async {
-        guard let url = target ?? savePanel(Exporter.safeName(d.title), format) else { return }
+        let chosen: URL?
+        if let target { chosen = target } else { chosen = await savePanel(Exporter.safeName(d.title), format) }
+        guard let url = chosen else { return }
         do {
             let data: Data
             switch format {

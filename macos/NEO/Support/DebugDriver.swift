@@ -313,6 +313,25 @@ enum DebugDriver {
                 }
             }
             try? out.write(toFile: arg, atomically: true, encoding: .utf8)
+        case "probepanel":
+            // probepanel <file>: open the real export panel, describe it, cancel it
+            let file = arg
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                var out = ""
+                for w in NSApp.windows {
+                    out += "\(type(of: w)) frame=\(w.frame.size) resizable=\(w.styleMask.contains(.resizable)) min=\(w.minSize) max=\(w.maxSize) contentMin=\(w.contentMinSize) contentMax=\(w.contentMaxSize) sheet=\(w.isSheet) parent=\(w.sheetParent != nil)\n"
+                    if let p = w as? NSSavePanel { out += "  savepanel expanded=\(p.value(forKey: "isExpanded") ?? "?") showsResize=\(p.showsResizeIndicator)\n" }
+                }
+                out += "modal window: \(NSApp.modalWindow.map { String(describing: type(of: $0)) } ?? "none")\n"
+                for w in NSApp.windows { if let sh = w.attachedSheet {
+                    out += "sheet on main window: \(type(of: sh)) resizable=\(sh.styleMask.contains(.resizable)) size=\(sh.frame.size) min=\(sh.minSize)\n"
+                    w.endSheet(sh, returnCode: .cancel)
+                } }
+                try? out.write(toFile: file, atomically: true, encoding: .utf8)
+                NSApp.abortModal()
+                NSApp.modalWindow?.close()
+            }
+            app.export("txt")
         case "flush":
             s?.flushAll()
         case "shot":
